@@ -1,0 +1,45 @@
+### POST - Crear un nuevo detalle de venta
+POST http://localhost:5200/api/SaleDetails
+Content-Type: application/json
+Authorization: Bearer YOUR_JWT_TOKEN_HERE
+X-Actor-Id: 1
+
+{
+  "sale_id": 1,
+  "medicine_id": 1,
+  "quantity": 1,
+  "unit_price": 5.00,
+  "description": "Lapiz Negro HB"
+}
+
+### GET - Obtener todos los detalles de venta
+GET http://localhost:5200/api/SaleDetails
+Authorization: Bearer YOUR_JWT_TOKEN_HERE
+
+### GET - Obtener un detalle de venta por ID
+GET http://localhost:5200/api/SaleDetails/1
+Authorization: Bearer YOUR_JWT_TOKEN_HERE
+
+### GET - Obtener todos los detalles de una venta específica
+GET http://localhost:5200/api/SaleDetails/sale/1
+Authorization: Bearer YOUR_JWT_TOKEN_HERE
+
+### PUT - Actualizar un detalle de venta
+PUT http://localhost:5200/api/SaleDetails/1
+Content-Type: application/json
+Authorization: Bearer YOUR_JWT_TOKEN_HERE
+X-Actor-Id: 1
+
+{
+  "id": 1,
+  "sale_id": 1,
+  "medicine_id": 1,
+  "quantity": 2,
+  "unit_price": 5.00,
+  "description": "Lapiz Negro HB - Actualizado"
+}
+
+### DELETE - Eliminar (soft delete) un detalle de venta
+DELETE http://localhost:5200/api/SaleDetails/1
+Authorization: Bearer YOUR_JWT_TOKEN_HERE
+X-Actor-Id: 1

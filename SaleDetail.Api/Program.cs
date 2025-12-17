@@ -58,6 +58,7 @@ builder.Services.AddHttpContextAccessor();
 
 // Messaging / outbox / Saga registrations
 builder.Services.AddSingleton<IEventPublisher, RabbitPublisher>();
+builder.Services.AddSingleton<RabbitMQConfiguration>();
 
 // Register OutboxRepository for background processor as transient using a plain connection (no transaction)
 builder.Services.AddTransient<IOutboxRepository>(sp =>
@@ -121,6 +122,13 @@ builder.Services
 builder.Services.AddAuthorization();
 
 var app = builder.Build();
+
+// 🐰 Inicializar RabbitMQ (crear cola y bindings)
+using (var scope = app.Services.CreateScope())
+{
+    var rabbitConfig = scope.ServiceProvider.GetRequiredService<RabbitMQConfiguration>();
+    rabbitConfig.Initialize();
+}
 
 if (app.Environment.IsDevelopment())
 {

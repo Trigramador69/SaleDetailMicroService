@@ -9,7 +9,7 @@ namespace SaleDetail.Api.Controllers
 {
     [Route("api/[controller]")]
     [ApiController]
-    //[Authorize]  // TEMPORALMENTE DESACTIVADO PARA PRUEBAS
+    [Authorize]  // ✅ JWT ACTIVADO - Requiere token válido
     public class SaleDetailsController : ControllerBase
     {
         private readonly ISaleDetailService _saleDetailService;

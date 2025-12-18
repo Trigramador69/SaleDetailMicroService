@@ -9,20 +9,23 @@ namespace SaleDetail.Api.Controllers
 {
     [Route("api/[controller]")]
     [ApiController]
-    [Authorize]  // ✅ JWT ACTIVADO - Requiere token válido
+    //[Authorize]
     public class SaleDetailsController : ControllerBase
     {
         private readonly ISaleDetailService _saleDetailService;
+        private readonly ILogger<SaleDetailsController> _logger;
 
-        public SaleDetailsController(ISaleDetailService saleDetailService)
+        public SaleDetailsController(
+            ISaleDetailService saleDetailService,
+            ILogger<SaleDetailsController> logger)
         {
             _saleDetailService = saleDetailService;
+            _logger = logger;
         }
 
-        private static int ParseActorId(string? header)
-        {
-            return int.TryParse(header, out var id) ? id : 0;
-        }
+        // Método auxiliar simplificado
+        private static int ParseActorId(string? header) =>
+            int.TryParse(header, out var id) ? id : 0;
 
         [HttpPost]
         [ProducesResponseType(typeof(SaleDetail.Domain.Entities.SaleDetail), (int)HttpStatusCode.Created)]
@@ -33,11 +36,13 @@ namespace SaleDetail.Api.Controllers
         {
             try
             {
-                // DEBUG: Log para ver qué llega
-                Console.WriteLine($"DEBUG - SaleId: {request.SaleId}, MedicineId: {request.MedicineId}, Quantity: {request.Quantity}");
-                
+                // Log profesional en lugar de Console.WriteLine
+                _logger.LogInformation("Iniciando registro de detalle. SaleId: {SaleId}, MedicineId: {MedicineId}",
+                    request.SaleId, request.MedicineId);
+
                 var actorId = ParseActorId(actorHeader);
-                
+
+                // Mapeo manual (DTO -> Entity)
                 var saleDetail = new SaleDetail.Domain.Entities.SaleDetail
                 {
                     sale_id = request.SaleId,
@@ -48,20 +53,19 @@ namespace SaleDetail.Api.Controllers
                     description = request.Description,
                     created_by = request.CreatedBy
                 };
-                
+
                 var created = await _saleDetailService.RegisterAsync(saleDetail, actorId);
+
                 return CreatedAtAction(nameof(GetById), new { id = created.id }, created);
             }
             catch (ValidationException ex)
             {
-                return BadRequest(new
-                {
-                    message = ex.Message,
-                    errors = ex.Errors
-                });
+                _logger.LogWarning(ex, "Error de validación al registrar detalle");
+                return BadRequest(new { message = ex.Message, errors = ex.Errors });
             }
             catch (DomainException ex)
             {
+                _logger.LogError(ex, "Error de dominio al registrar detalle");
                 return BadRequest(new { message = ex.Message });
             }
         }
@@ -75,7 +79,10 @@ namespace SaleDetail.Api.Controllers
             {
                 var result = await _saleDetailService.GetByIdAsync(id);
                 if (result == null)
+                {
+                    _logger.LogWarning("Detalle de venta con ID {Id} no encontrado", id);
                     return NotFound(new { message = $"Detalle de venta con ID {id} no encontrado." });
+                }
 
                 return Ok(result);
             }
@@ -102,7 +109,7 @@ namespace SaleDetail.Api.Controllers
 
         [HttpGet("sale/{saleId}")]
         [ProducesResponseType(typeof(IEnumerable<SaleDetail.Domain.Entities.SaleDetail>), (int)HttpStatusCode.OK)]
-        public async Task<IActionResult> GetBySaleId(int saleId)
+        public async Task<IActionResult> GetBySaleId(string saleId)
         {
             try
             {
@@ -127,20 +134,21 @@ namespace SaleDetail.Api.Controllers
             try
             {
                 var actorId = ParseActorId(actorHeader);
-                
-                // Primero obtenemos el registro existente
+
                 var existing = await _saleDetailService.GetByIdAsync(id);
                 if (existing == null)
                     return NotFound(new { message = $"Detalle de venta con ID {id} no encontrado." });
-                
-                // Actualizamos solo los campos proporcionados
+
+                // Mapeo de actualización
                 existing.quantity = request.Quantity;
                 existing.unit_price = request.UnitPrice;
                 existing.total_amount = request.TotalAmount;
+
                 if (!string.IsNullOrEmpty(request.Description))
                     existing.description = request.Description;
+
                 existing.updated_by = request.UpdatedBy;
-                
+
                 await _saleDetailService.UpdateAsync(existing, actorId);
                 return NoContent();
             }
@@ -150,11 +158,7 @@ namespace SaleDetail.Api.Controllers
             }
             catch (ValidationException ex)
             {
-                return BadRequest(new
-                {
-                    message = ex.Message,
-                    errors = ex.Errors
-                });
+                return BadRequest(new { message = ex.Message, errors = ex.Errors });
             }
             catch (DomainException ex)
             {

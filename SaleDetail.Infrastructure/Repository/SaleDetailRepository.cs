@@ -1,11 +1,12 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Data;
 using System.Data.Common;
 using System.Threading.Tasks;
 using MySql.Data.MySqlClient;
 using SaleDetail.Domain.Interfaces;
-using SaleDetail.Infrastructure.Persistences;
+// Asegúrate de que este namespace coincida con tu estructura
+// using SaleDetail.Infrastructure.Persistences; 
 
 namespace SaleDetail.Infrastructure.Repository
 {
@@ -20,22 +21,32 @@ namespace SaleDetail.Infrastructure.Repository
             _transaction = transaction;
         }
 
+        //  CORRECCIÓN CRÍTICA AQUÍ: Método de mapeo robusto
         private SaleDetail.Domain.Entities.SaleDetail MapSaleDetail(DbDataReader reader)
         {
             return new SaleDetail.Domain.Entities.SaleDetail
             {
                 id = reader.GetInt32("id"),
-                sale_id = reader.GetInt32("sale_id"),
+
+                // 1. Usar .ToString() para leer el UUID de forma segura (igual que en Sales)
+                sale_id = reader["sale_id"].ToString(),
+
                 medicine_id = reader.GetInt32("medicine_id"),
                 quantity = reader.GetInt32("quantity"),
                 unit_price = reader.GetDecimal("unit_price"),
                 total_amount = reader.GetDecimal("total_amount"),
-                description = reader.GetString("description"),
+
+                // 2. Manejo seguro de nulos en descripción
+                description = reader["description"] == DBNull.Value ? "" : reader["description"].ToString(),
+
                 is_deleted = reader.GetBoolean("is_deleted"),
                 created_at = reader.GetDateTime("created_at"),
+
                 updated_at = reader["updated_at"] == DBNull.Value ? null : reader.GetDateTime("updated_at"),
-                created_by = reader["created_by"] == DBNull.Value ? null : reader.GetInt32("created_by"),
-                updated_by = reader["updated_by"] == DBNull.Value ? null : reader.GetInt32("updated_by")
+
+                // 3. Convert.ToInt32 es más flexible que GetInt32 para tipos numéricos MySQL
+                created_by = reader["created_by"] == DBNull.Value ? null : Convert.ToInt32(reader["created_by"]),
+                updated_by = reader["updated_by"] == DBNull.Value ? null : Convert.ToInt32(reader["updated_by"])
             };
         }
 
@@ -59,7 +70,7 @@ namespace SaleDetail.Infrastructure.Repository
                 cmd.Parameters.AddWithValue("@quantity", entity.quantity);
                 cmd.Parameters.AddWithValue("@unit_price", entity.unit_price);
                 cmd.Parameters.AddWithValue("@total_amount", entity.total_amount);
-                cmd.Parameters.AddWithValue("@description", entity.description);
+                cmd.Parameters.AddWithValue("@description", entity.description ?? ""); // Evitar null
                 cmd.Parameters.AddWithValue("@created_at", entity.created_at);
                 cmd.Parameters.AddWithValue("@created_by", entity.created_by.HasValue ? (object)entity.created_by.Value : DBNull.Value);
                 cmd.Parameters.AddWithValue("@updated_at", entity.updated_at.HasValue ? (object)entity.updated_at.Value : DBNull.Value);
@@ -138,7 +149,7 @@ namespace SaleDetail.Infrastructure.Repository
             }
         }
 
-        public async Task<IEnumerable<SaleDetail.Domain.Entities.SaleDetail>> GetBySaleId(int saleId)
+        public async Task<IEnumerable<SaleDetail.Domain.Entities.SaleDetail>> GetBySaleId(string saleId)
         {
             const string query = @"
                 SELECT id, sale_id, medicine_id, quantity, unit_price, total_amount, description,
@@ -199,7 +210,7 @@ namespace SaleDetail.Infrastructure.Repository
                 cmd.Parameters.AddWithValue("@quantity", entity.quantity);
                 cmd.Parameters.AddWithValue("@unit_price", entity.unit_price);
                 cmd.Parameters.AddWithValue("@total_amount", entity.total_amount);
-                cmd.Parameters.AddWithValue("@description", entity.description);
+                cmd.Parameters.AddWithValue("@description", entity.description ?? "");
                 cmd.Parameters.AddWithValue("@updated_at", entity.updated_at.HasValue ? (object)entity.updated_at.Value : DBNull.Value);
                 cmd.Parameters.AddWithValue("@updated_by", entity.updated_by.HasValue ? (object)entity.updated_by.Value : DBNull.Value);
 

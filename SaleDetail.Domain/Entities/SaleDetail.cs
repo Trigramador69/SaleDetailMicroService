@@ -7,7 +7,7 @@ namespace SaleDetail.Domain.Entities
         public int id { get; set; }
         
         // FK al microservicio de Ventas (Sale)
-        public int sale_id { get; set; }
+        public string sale_id { get; set; }
         
         // FK al microservicio de Medicinas
         public int medicine_id { get; set; }

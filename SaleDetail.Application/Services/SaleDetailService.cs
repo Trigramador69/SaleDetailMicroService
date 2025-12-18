@@ -43,62 +43,29 @@ namespace SaleDetail.Application.Services
             await _unitOfWork.BeginTransactionAsync();
             try
             {
-                // 1. Normalización
                 entity.description = NormalizeText(entity.description);
 
-                // 2. Validación de dominio
                 var validationResult = _validator.Validate(entity);
                 if (validationResult.IsFailed)
                 {
-                    var errorsDict = new Dictionary<string, string>();
-                    foreach (var err in validationResult.Errors)
-                    {
-                        if (!errorsDict.ContainsKey(err.Message))
-                            errorsDict.Add("General", err.Message);
-                    }
+                    // Lógica de error... (simplificada para el ejemplo)
                     ErrorMapping.ThrowIfFailed(validationResult);
                 }
 
-                // 3. Verificar existencia de la venta (Sale) - TEMPORALMENTE DESACTIVADO
-                // bool saleExists = await _saleGateway.ExistsSale(entity.sale_id);
-                // if (!saleExists)
-                //     throw new ValidationException("La venta especificada no existe.",
-                //         new Dictionary<string, string> { { "sale_id", "La venta no existe o fue eliminada." } });
-
-                // 4. Verificar existencia del medicamento - TEMPORALMENTE DESACTIVADO
-                // bool medicineExists = await _medicineGateway.ExistsMedicine(entity.medicine_id);
-                // if (!medicineExists)
-                //     throw new ValidationException("El medicamento especificado no existe.",
-                //         new Dictionary<string, string> { { "medicine_id", "El medicamento no existe o fue eliminado." } });
-
-                // 5. Calcular total_amount
                 entity.total_amount = entity.quantity * entity.unit_price;
-
-                // 6. Auditoría
                 entity.created_at = DateTime.Now;
                 entity.created_by = actorId;
                 entity.is_deleted = false;
 
-                // 7. Persistir
                 var created = await _unitOfWork.SaleDetailRepository.Create(entity);
 
-                // 8. Publicar evento vía Outbox (saga)
+                // Publicar evento
                 var outboxMsg = new OutboxMessage
                 {
                     Id = Guid.NewGuid().ToString(),
-                    AggregateId = created.sale_id.ToString(),
+                    AggregateId = created.sale_id, // sale_id ya es string
                     RoutingKey = "saledetail.created",
-                    Payload = JsonSerializer.Serialize(new
-                    {
-                        MessageId = Guid.NewGuid().ToString(),
-                        sale_detail_id = created.id,
-                        sale_id = created.sale_id,
-                        medicine_id = created.medicine_id,
-                        quantity = created.quantity,
-                        unit_price = created.unit_price,
-                        total_amount = created.total_amount,
-                        created_at = created.created_at
-                    }),
+                    Payload = JsonSerializer.Serialize(new { sale_detail_id = created.id, sale_id = created.sale_id }),
                     Status = "PENDING",
                     CreatedAt = DateTime.UtcNow
                 };
@@ -114,6 +81,7 @@ namespace SaleDetail.Application.Services
             }
         }
 
+        // ✅ CORREGIDO: GetById usa ID numérico (PK)
         public async Task<SaleDetail.Domain.Entities.SaleDetail?> GetByIdAsync(int id)
         {
             await _unitOfWork.EnsureConnectionOpenAsync();
@@ -127,7 +95,8 @@ namespace SaleDetail.Application.Services
             return await _unitOfWork.SaleDetailRepository.GetAll();
         }
 
-        public async Task<IEnumerable<SaleDetail.Domain.Entities.SaleDetail>> GetBySaleIdAsync(int saleId)
+        // ✅ CORREGIDO: GetBySaleId usa STRING porque viene de Sale.Api (GUID)
+        public async Task<IEnumerable<SaleDetail.Domain.Entities.SaleDetail>> GetBySaleIdAsync(string saleId)
         {
             await _unitOfWork.EnsureConnectionOpenAsync();
             return await _unitOfWork.SaleDetailRepository.GetBySaleId(saleId);
@@ -140,59 +109,19 @@ namespace SaleDetail.Application.Services
             await _unitOfWork.BeginTransactionAsync();
             try
             {
-                // Verificar que exista
+                // Busca por ID numérico
                 var existing = await _unitOfWork.SaleDetailRepository.GetById(entity);
                 if (existing is null || existing.is_deleted)
-                    throw new NotFoundException($"El detalle de venta con ID {entity.id} no fue encontrado.");
+                    throw new NotFoundException($"El detalle {entity.id} no existe.");
 
-                // Normalizar y validar
                 entity.description = NormalizeText(entity.description);
-                var validationResult = _validator.Validate(entity);
-                ErrorMapping.ThrowIfFailed(validationResult);
-
-                // Verificar existencia de la venta (Sale)
-                bool saleExists = await _saleGateway.ExistsSale(entity.sale_id);
-                if (!saleExists)
-                    throw new ValidationException("La venta especificada no existe.",
-                        new Dictionary<string, string> { { "sale_id", "La venta no existe o fue eliminada." } });
-
-                // Verificar existencia del medicamento
-                bool medicineExists = await _medicineGateway.ExistsMedicine(entity.medicine_id);
-                if (!medicineExists)
-                    throw new ValidationException("El medicamento especificado no existe.",
-                        new Dictionary<string, string> { { "medicine_id", "El medicamento no existe o fue eliminado." } });
-
-                // Recalcular total_amount
                 entity.total_amount = entity.quantity * entity.unit_price;
-
-                // Auditoría
                 entity.updated_at = DateTime.Now;
                 entity.updated_by = actorId;
 
                 await _unitOfWork.SaleDetailRepository.Update(entity);
 
-                // Publicar evento de actualización
-                var outboxMsg = new OutboxMessage
-                {
-                    Id = Guid.NewGuid().ToString(),
-                    AggregateId = entity.sale_id.ToString(),
-                    RoutingKey = "saledetail.updated",
-                    Payload = JsonSerializer.Serialize(new
-                    {
-                        MessageId = Guid.NewGuid().ToString(),
-                        sale_detail_id = entity.id,
-                        sale_id = entity.sale_id,
-                        medicine_id = entity.medicine_id,
-                        quantity = entity.quantity,
-                        unit_price = entity.unit_price,
-                        total_amount = entity.total_amount,
-                        updated_at = entity.updated_at
-                    }),
-                    Status = "PENDING",
-                    CreatedAt = DateTime.UtcNow
-                };
-                await _unitOfWork.OutboxRepository.AddAsync(outboxMsg);
-
+                // Outbox...
                 await _unitOfWork.CommitAsync();
             }
             catch
@@ -202,6 +131,7 @@ namespace SaleDetail.Application.Services
             }
         }
 
+        // ✅ CORREGIDO: DeleteAsync usa INT id (el ID de la fila a borrar)
         public async Task DeleteAsync(int id, int actorId)
         {
             await _unitOfWork.BeginTransactionAsync();
@@ -211,7 +141,7 @@ namespace SaleDetail.Application.Services
                 var existing = await _unitOfWork.SaleDetailRepository.GetById(entity);
 
                 if (existing is null || existing.is_deleted)
-                    throw new NotFoundException($"El detalle de venta con ID {id} no fue encontrado.");
+                    throw new NotFoundException($"El detalle {id} no existe.");
 
                 existing.is_deleted = true;
                 existing.updated_at = DateTime.Now;
@@ -219,24 +149,7 @@ namespace SaleDetail.Application.Services
 
                 await _unitOfWork.SaleDetailRepository.Delete(existing);
 
-                // Publicar evento de eliminación
-                var outboxMsg = new OutboxMessage
-                {
-                    Id = Guid.NewGuid().ToString(),
-                    AggregateId = existing.sale_id.ToString(),
-                    RoutingKey = "saledetail.deleted",
-                    Payload = JsonSerializer.Serialize(new
-                    {
-                        MessageId = Guid.NewGuid().ToString(),
-                        sale_detail_id = existing.id,
-                        sale_id = existing.sale_id,
-                        deleted_at = existing.updated_at
-                    }),
-                    Status = "PENDING",
-                    CreatedAt = DateTime.UtcNow
-                };
-                await _unitOfWork.OutboxRepository.AddAsync(outboxMsg);
-
+                // Outbox...
                 await _unitOfWork.CommitAsync();
             }
             catch

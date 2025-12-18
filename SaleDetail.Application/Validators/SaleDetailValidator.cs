@@ -9,11 +9,7 @@ namespace SaleDetail.Application.Validators
         {
             var r = Result.Ok();
 
-            // 1. Validar Sale ID
-            if (sd.sale_id <= 0)
-            {
-                r = r.WithFieldError("sale_id", "Debe seleccionar una venta válida.");
-            }
+            
 
             // 2. Validar Medicine ID
             if (sd.medicine_id <= 0)

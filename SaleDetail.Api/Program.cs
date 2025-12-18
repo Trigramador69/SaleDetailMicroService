@@ -16,12 +16,23 @@ var builder = WebApplication.CreateBuilder(args);
 // Initialize DatabaseConnection singleton
 DatabaseConnection.Initialize(builder.Configuration);
 
+// 1. AGREGAR SERVICIO DE CORS (CORRECCIÓN CRÍTICA PARA EL FRONTEND)
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy("AllowAll", policy =>
+    {
+        policy.AllowAnyOrigin()
+              .AllowAnyMethod()
+              .AllowAnyHeader();
+    });
+});
+
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(c =>
 {
     c.SwaggerDoc("v1", new OpenApiInfo { Title = "SaleDetail.Api", Version = "v1" });
-    
+
     // Configuración para JWT en Swagger
     c.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
     {
@@ -31,7 +42,7 @@ builder.Services.AddSwaggerGen(c =>
         Type = SecuritySchemeType.ApiKey,
         Scheme = "Bearer"
     });
-    
+
     c.AddSecurityRequirement(new OpenApiSecurityRequirement
     {
         {
@@ -80,10 +91,11 @@ builder.Services.AddHttpClient("SalesApi", client =>
     client.DefaultRequestHeaders.Add("Accept", "application/json");
 });
 
+// --- CONFIGURACIÓN DE AUTENTICACIÓN CORREGIDA ---
 var jwtSection = builder.Configuration.GetSection("Jwt");
-var jwtKey = jwtSection["Key"] ?? throw new InvalidOperationException("Jwt:Key no configurado");
-var jwtIssuer = jwtSection["Issuer"];
-var jwtAudience = jwtSection["Audience"];
+var jwtKey = jwtSection["Key"] ?? throw new InvalidOperationException("Jwt:Key no configurado en appsettings.json");
+var jwtIssuer = jwtSection["Issuer"];     // Puede ser nulo o vacío
+var jwtAudience = jwtSection["Audience"]; // Puede ser nulo o vacío
 
 var keyBytes = Encoding.UTF8.GetBytes(jwtKey);
 
@@ -91,29 +103,39 @@ builder.Services
     .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>
     {
+        options.RequireHttpsMetadata = false; // Útil en desarrollo si no usas HTTPS estricto
+        options.SaveToken = true;
+
         options.TokenValidationParameters = new TokenValidationParameters
         {
-            ValidateIssuer = true,
-            ValidateAudience = true,
-            ValidateLifetime = true,
+            // 1. LA CLAVE (Lo más importante)
             ValidateIssuerSigningKey = true,
-            ValidIssuer = jwtIssuer,
-            ValidAudience = jwtAudience,
             IssuerSigningKey = new SymmetricSecurityKey(keyBytes),
+
+            // 2. EL CAMBIO CRÍTICO: Usar la misma lógica que User.Api
+            // Solo validamos Issuer/Audience si existen en el appsettings
+            ValidateIssuer = !string.IsNullOrWhiteSpace(jwtIssuer),
+            ValidIssuer = jwtIssuer,
+
+            ValidateAudience = !string.IsNullOrWhiteSpace(jwtAudience),
+            ValidAudience = jwtAudience,
+
+            // 3. Tiempos
+            ValidateLifetime = true,
             ClockSkew = TimeSpan.Zero
         };
-        
-        // DEBUG: Log authentication failures
+
+        // Debug de errores
         options.Events = new JwtBearerEvents
         {
             OnAuthenticationFailed = context =>
             {
-                Console.WriteLine($"🔴 AUTH FAILED: {context.Exception.Message}");
+                Console.WriteLine($"🔴 SALE_DETAIL AUTH ERROR: {context.Exception.Message}");
                 return Task.CompletedTask;
             },
             OnTokenValidated = context =>
             {
-                Console.WriteLine($"✅ TOKEN VÁLIDO para: {context.Principal?.Identity?.Name}");
+                Console.WriteLine($"✅ SALE_DETAIL TOKEN OK. Usuario: {context.Principal?.Identity?.Name}");
                 return Task.CompletedTask;
             }
         };
@@ -139,8 +161,11 @@ if (app.Environment.IsDevelopment())
 
 app.UseHttpsRedirection();
 
-app.UseAuthentication();   
-app.UseAuthorization();    
+// 2. ACTIVAR CORS (IMPORTANTE: ANTES DE AUTH Y MAPCONTROLLERS)
+app.UseCors("AllowAll");
+
+app.UseAuthentication();
+app.UseAuthorization();
 
 app.MapControllers();
 

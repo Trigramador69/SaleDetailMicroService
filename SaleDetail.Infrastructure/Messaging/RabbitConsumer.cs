@@ -107,80 +107,69 @@ namespace SaleDetail.Infrastructure.Messaging
 
         private async Task ProcessSaleCreatedAndSaveDetails(JsonElement root, IServiceScope scope)
         {
-            // 1. Obtener ID de Venta (String/UUID)
             var saleId = root.GetProperty("sale_id").GetString();
-
-            // Intentar obtener created_by de forma segura
-            int createdBy = 1;
-            if (root.TryGetProperty("created_by", out var cb))
-            {
-                if (cb.ValueKind == JsonValueKind.Number)
-                    createdBy = cb.GetInt32();
-                else if (cb.ValueKind == JsonValueKind.String && int.TryParse(cb.GetString(), out int cbVal))
-                    createdBy = cbVal;
-            }
-
-            // 2. Obtener Repositorios del Scope
             var uow = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
-            var outboxRepo = scope.ServiceProvider.GetRequiredService<IOutboxRepository>();
 
-            // 3. Procesar Items
-            if (root.TryGetProperty("items", out var itemsElement) && itemsElement.ValueKind == JsonValueKind.Array)
+            // INICIAR TRANSACCIÓN
+            await uow.BeginTransactionAsync();
+
+            try
             {
-                foreach (var item in itemsElement.EnumerateArray())
+                if (root.TryGetProperty("items", out var itemsElement) && itemsElement.ValueKind == JsonValueKind.Array)
                 {
-                    // LECTURA ROBUSTA (Soporta números y strings numéricos para evitar el error anterior)
-                    var medId = GetIntProperty(item, "MedId", "medId");
-                    var quantity = GetIntProperty(item, "Quantity", "quantity");
-                    var price = GetDecimalProperty(item, "Price", "price");
-
-                    // A. Crear Entidad SaleDetail
-                    var detail = new SaleDetail.Domain.Entities.SaleDetail
+                    foreach (var item in itemsElement.EnumerateArray())
                     {
-                        sale_id = saleId,
-                        medicine_id = medId,
-                        quantity = quantity,
-                        unit_price = price,
-                        total_amount = quantity * price,
-                        description = "Venta registrada via RabbitMQ",
-                        created_at = DateTime.UtcNow,
-                        created_by = createdBy,
-                        is_deleted = false
-                    };
+                        var medId = GetIntProperty(item, "MedId", "medId");
+                        var quantity = GetIntProperty(item, "Quantity", "quantity");
+                        var price = GetDecimalProperty(item, "Price", "price");
 
-                    // B. Guardar en Base de Datos (SaleDetails)
-                    await uow.SaleDetailRepository.Create(detail);
+                        var detail = new SaleDetail.Domain.Entities.SaleDetail
+                        {
+                            sale_id = saleId,
+                            medicine_id = medId,
+                            quantity = quantity,
+                            unit_price = price,
+                            total_amount = quantity * price,
+                            description = "Venta registrada via RabbitMQ",
+                            created_at = DateTime.UtcNow,
+                            is_deleted = false
+                        };
 
-                    // C. Preparar Evento para Outbox
-                    var integrationEvent = new
-                    {
-                        Event = "SaleDetailCreated",
-                        DetailId = detail.id,
-                        SaleId = saleId,
-                        MedicineId = medId,
-                        Quantity = quantity,
-                        Timestamp = DateTime.UtcNow
-                    };
-                    var payload = JsonSerializer.Serialize(integrationEvent);
+                        // Guardar detalle usando el repositorio del UoW
+                        await uow.SaleDetailRepository.Create(detail);
 
-                    // D. Crear Entidad OutboxMessage (Coincidiendo con tu OutboxRepository)
-                    var outboxMsg = new SaleDetail.Domain.Entities.OutboxMessage
-                    {
-                        Id = Guid.NewGuid().ToString(), // UUID como string
-                        AggregateId = saleId,           // Vinculamos al ID de la venta
-                        RoutingKey = "sale.detail.created",
-                        Payload = payload,
-                        Status = "PENDING",
-                        CreatedAt = DateTime.UtcNow,
-                        AttemptCount = 0,
-                        ErrorLog = null
-                    };
+                        var integrationEvent = new
+                        {
+                            Event = "SaleDetailCreated",
+                            SaleId = saleId,
+                            Timestamp = DateTime.UtcNow
+                        };
 
-                    // E. Guardar en Base de Datos (Outbox) usando tu método AddAsync
-                    await outboxRepo.AddAsync(outboxMsg);
+                        var outboxMsg = new SaleDetail.Domain.Entities.OutboxMessage
+                        {
+                            Id = Guid.NewGuid().ToString(),
+                            AggregateId = saleId,
+                            RoutingKey = "sale.detail.created",
+                            Payload = JsonSerializer.Serialize(integrationEvent),
+                            Status = "PENDING",
+                            CreatedAt = DateTime.UtcNow
+                        };
+
+                        // Guardar outbox usando el repositorio del UoW
+                        await uow.OutboxRepository.AddAsync(outboxMsg);
+                    }
+
+                    // CONFIRMAR TODO
+                    await uow.CommitAsync();
+                    _log.LogInformation("Detalles y Outbox guardados para venta {id}", saleId);
                 }
-
-                _log.LogInformation("Detalles guardados y Outbox generado para venta {id}", saleId);
+            }
+            catch (Exception ex)
+            {
+                // SI ALGO FALLA, REVERTIR TODO
+                await uow.RollbackAsync();
+                _log.LogError(ex, "Error guardando detalles. Transacción revertida.");
+                throw;
             }
         }
 
